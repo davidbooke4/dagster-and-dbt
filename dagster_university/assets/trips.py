@@ -1,7 +1,9 @@
 from io import BytesIO
+import os
 
 import pandas as pd
 import requests
+import boto3
 from dagster import AssetExecutionContext, MaterializeResult, MetadataValue, asset
 from dagster_duckdb import DuckDBResource
 from smart_open import open
@@ -21,10 +23,24 @@ def taxi_zones_file() -> MaterializeResult:
         "https://data.cityofnewyork.us/api/views/755u-8jsi/rows.csv?accessType=DOWNLOAD"
     )
 
-    with open(
-        constants.TAXI_ZONES_FILE_PATH, "wb", transport_params=smart_open_config
-    ) as output_file:
-        output_file.write(raw_taxi_zones.content)
+    if os.getenv("DAGSTER_ENVIRONMENT") == "prod":
+        s3_client = boto3.client(
+            region_name=os.getenv("AWS_REGION"),
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY")
+        )
+
+        s3_client.put_object(
+            Bucket=os.getenv("S3_BUCKET_PREFIX"),
+            Key=constants.TAXI_ZONES_FILE_PATH,
+            Body=raw_taxi_zones.content
+        )
+
+    else:
+        with open(
+            constants.TAXI_ZONES_FILE_PATH, "wb", transport_params=smart_open_config
+        ) as output_file:
+            output_file.write(raw_taxi_zones.content)
 
     num_rows = len(pd.read_csv(BytesIO(raw_taxi_zones.content)))
     return MaterializeResult(metadata={"Number of records": MetadataValue.int(num_rows)})
